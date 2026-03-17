@@ -1,6 +1,13 @@
 # 7coder
 Claude Code alternative for Windows 7/NodeJS 13.
 
+## System Requirements
+
+- **OS**: Windows 7 SP1 or later
+- **Node.js**: v13.x.x
+- **RAM**: 2GB minimum
+- **Disk Space**: 500MB free
+
 ## Cheat sheet
 
 **REPL:**
