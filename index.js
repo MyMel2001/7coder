@@ -1,6 +1,11 @@
-require('dotenv').config();
 const axios = require('axios');
 const readline = require('readline');
+const path = require('path');
+
+// == cd to script's dir so that we can find .env file ==
+process.chdir(path.dirname(process.argv[1]));
+
+require('dotenv').config();
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_ENDPOINT = process.env.OPENAI_ENDPOINT || 'https://api.openai.com/v1';
@@ -20,7 +25,7 @@ const launchDir = process.cwd();
 process.chdir(launchDir);                    // Force cd (handles Windows 7 shortcuts, any drive, etc.)
 console.log(`✅ 7coder cd'ed to: ${launchDir}`);
 
-const systemPrompt = `You are Claude, a helpful, honest, and harmless AI coding assistant created by Anthropic.`;
+const systemPrompt = `You are 7coder, a helpful, honest, and harmless AI coding assistant created by Anthropic.`;
 
 let messages = [{ role: 'system', content: systemPrompt }];
 
@@ -54,7 +59,7 @@ async function callOpenAI(currentMessages) {
       );
       return response.data.choices[0].message.content.trim();
     } catch (error) {
-      const msg = error.response?.data?.error?.message || error.message;
+        const msg = (error.response && error.response.data && error.response.data.error && error.response.data.error.message) || error.message;
       console.error(`⚠️ API attempt ${attempt}/${MAX_RETRIES} failed: ${msg}`);
 
       if (attempt === MAX_RETRIES) throw new Error('Max API retries reached.');
