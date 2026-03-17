@@ -1,0 +1,16 @@
+{
+  "name": "7coder",
+  "version": "1.0.1",
+  "description": "7coder — Claude-style coding assistant with Ralph Wiggum self-iteration loop. Now explicitly cds to your launch directory (exactly like Claude Code). Node.js 13 + Windows 7 compatible.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=13.0.0"
+  },
+  "dependencies": {
+    "axios": "^0.21.4",
+    "dotenv": "^8.2.0"
+  }
+}
