@@ -188,14 +188,15 @@ async function processWithTools(currentMessages) {
     const choice = await callOpenAI(currentMessages);
     const assistantMsg = choice.message;
     currentMessages.push(assistantMsg);
-
-    if (assistantMsg.tool_calls?.length > 0) {
-      console.log(`🔧 Using ${assistantMsg.tool_calls.length} tool(s)...`);
-      for (const tc of assistantMsg.tool_calls) {
-        const result = await executeTool(tc);
-        currentMessages.push({ role: 'tool', tool_call_id: tc.id, content: result });
-      }
-      continue;
+    if (assistantMsg.tool_calls) {
+        if (assistantMsg.tool_calls.length > 0) {
+            console.log(`🔧 Using ${assistantMsg.tool_calls.length} tool(s)...`);
+            for (const tc of assistantMsg.tool_calls) {
+              const result = await executeTool(tc);
+              currentMessages.push({ role: 'tool', tool_call_id: tc.id, content: result });
+            }
+            continue;
+          }
     }
     return assistantMsg.content || '';
   }
@@ -262,7 +263,7 @@ if (promptArg) {
   console.log(`\n🚀 7coder non-interactive mode`);
   console.log(`Task: ${promptArg}`);
   messages.push({ role: 'user', content: promptArg });
-  await executeTask();
+  executeTask();
   process.exit(0);
 } else {
   // INTERACTIVE REPL (default)
