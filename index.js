@@ -227,7 +227,7 @@ async function callOpenAI(currentMessages) {
             Authorization: `Bearer ${OPENAI_API_KEY}`,
             'Content-Type': 'application/json',
           },
-          timeout: 90000,
+          timeout: 420000,
         }
       );
       return response.data.choices[0];
