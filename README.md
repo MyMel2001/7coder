@@ -22,7 +22,7 @@ node index.js --help
 
 ***DANGER MODE (NO CONFIRMATIONS!)***
 ```
-node index.js --prompt "Install dependencies and run tests" --danger
+node index.js --danger --prompt "Install dependencies and run tests"
 ```
 
 ## How Tools Work
@@ -46,4 +46,4 @@ API: Any OpenAI-compatible endpoint
 ## Why 7coder?
 Because real Claude Code is very expensive.
 This is the free, Windows-friendly, more open version that actually does everything most of Claude Code's functionality but compatible with Windows 7
-Made with love (and a lot of debugging on Windows 7) by ✨Grok and 😃MyMel2001.
+Vibe coded with love (and a lot of debugging on Windows 7) by 😃MyMel2001.
