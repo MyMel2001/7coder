@@ -3,6 +3,7 @@ const readline = require('readline');
 const path = require('path');
 const fs = require('fs');
 const child_process = require('child_process');
+const { mainModule } = require('process');
 
 // ====================== CLI ARGUMENT PARSING (Node 13 safe) ======================
 const args = process.argv.slice(2);
@@ -258,37 +259,40 @@ async function executeTask() {
 }
 
 // ====================== RUN MODE ======================
-if (promptArg) {
-  // NON-INTERACTIVE MODE
-  console.log(`\n🚀 7coder non-interactive mode`);
-  console.log(`Task: ${promptArg}`);
-  messages.push({ role: 'user', content: promptArg });
-  executeTask();
-  process.exit(0);
-} else {
-  // INTERACTIVE REPL (default)
-  console.log('\n🚀 Welcome to 7coder (interactive REPL)');
-  if (ENABLE_RALPH_MODE) console.log('🎉 Ralph Wiggum mode ENABLED');
-  if (DANGER_MODE) console.log('⚠️ DANGER MODE ENABLED');
-  console.log('Type your task or "exit" to quit.\n');
-
-  rl.prompt();
-
-  rl.on('line', async (input) => {
-    const trimmed = input.trim();
-    if (trimmed.toLowerCase() === 'exit') {
-      console.log('👋 Goodbye!');
-      rl.close();
-      return;
-    }
-    if (!trimmed) {
-      rl.prompt();
-      return;
-    }
-
-    messages.push({ role: 'user', content: trimmed });
-    console.log('7coder is thinking...');
-    await executeTask();
-    rl.prompt();
-  });
+async function main() {
+    if (promptArg) {
+        // NON-INTERACTIVE MODE
+        console.log(`\n🚀 7coder non-interactive mode`);
+        console.log(`Task: ${promptArg}`);
+        messages.push({ role: 'user', content: promptArg });
+        await executeTask();
+        process.exit(0);
+      } else {
+        // INTERACTIVE REPL (default)
+        console.log('\n🚀 Welcome to 7coder (interactive REPL)');
+        if (ENABLE_RALPH_MODE) console.log('🎉 Ralph Wiggum mode ENABLED');
+        if (DANGER_MODE) console.log('⚠️ DANGER MODE ENABLED');
+        console.log('Type your task or "exit" to quit.\n');
+      
+        rl.prompt();
+      
+        rl.on('line', async (input) => {
+          const trimmed = input.trim();
+          if (trimmed.toLowerCase() === 'exit') {
+            console.log('👋 Goodbye!');
+            rl.close();
+            return;
+          }
+          if (!trimmed) {
+            rl.prompt();
+            return;
+          }
+      
+          messages.push({ role: 'user', content: trimmed });
+          console.log('7coder is thinking...');
+          await executeTask();
+          rl.prompt();
+        });
+      }
 }
+main()
