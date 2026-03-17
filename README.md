@@ -4,7 +4,7 @@ Claude Code alternative for Windows 7/NodeJS 13.
 ## System Requirements
 
 - **OS**: Windows 7 SP1 or later
-- **Node.js**: v13.x.x
+- **Node.js**: v13.14.0
 - **RAM**: 2GB minimum
 - **Disk Space**: 500MB free
 
@@ -46,7 +46,7 @@ In normal mode it will ask y/n before running commands.
 
 ## Compatibility
 
-Node.js: 13.0.0 and above (no optional chaining, no modern syntax)
+Node.js: 13.14.0 and above (no optional chaining, no modern syntax)
 OS: Tested on Windows 7, should also work on newer Windows versions
 API: Any OpenAI-compatible endpoint
 
