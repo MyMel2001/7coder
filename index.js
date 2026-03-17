@@ -2,6 +2,10 @@ const axios = require('axios');
 const readline = require('readline');
 const path = require('path');
 
+// == SET LAUNCHDIR HERE ! ! ! ==
+
+const launchDir = process.cwd();
+
 // == cd to script's dir so that we can find .env file ==
 process.chdir(path.dirname(process.argv[1]));
 
@@ -21,7 +25,6 @@ if (!OPENAI_API_KEY) {
 }
 
 // === EXPLICIT CD TO USER'S CURRENT DIRECTORY (Claude Code style) ===
-const launchDir = process.cwd();
 process.chdir(launchDir);                    // Force cd (handles Windows 7 shortcuts, any drive, etc.)
 console.log(`✅ 7coder cd'ed to: ${launchDir}`);
 
