@@ -21,7 +21,9 @@ node index.js --help
 ```
 
 ***DANGER MODE (NO CONFIRMATIONS!)***
+```
 node index.js --prompt "Install dependencies and run tests" --danger
+```
 
 ## How Tools Work
 The AI can automatically:
