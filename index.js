@@ -60,7 +60,7 @@ Flags can be combined.
 const launchDir = process.cwd();
 
 // == cd to script's dir so that we can find .env file ==
-process.chdir(path.dirname(process.argv[1]));
+process.chdir(path.resolve(path.dirname(process.argv[1])));
 
 require('dotenv').config();
 
@@ -736,13 +736,16 @@ async function main() {
         console.log(`Task: ${promptArg}`);
         messages.push({ role: 'user', content: promptArg });
         await executeTask();
+        if (ENABLE_HTTP_SERVER) {
+          startHttpServer()
+        }
         process.exit(0);
       } else {
         // INTERACTIVE REPL (default)
         console.log('\n🚀 Welcome to 7coder (interactive REPL)');
         if (ENABLE_RALPH_MODE) console.log('🎉 Ralph Wiggum mode ENABLED');
         if (DANGER_MODE) console.log('⚠️ DANGER MODE ENABLED');
-        console.log('Type your task followed by a new line then "/done"\n')
+        console.log('Type your task followed by a new line then "/done"')
         console.log('to start a new task, or type "/bye" to quit.\n');
       
         rl.prompt();
