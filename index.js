@@ -11,6 +11,9 @@ const args = process.argv.slice(2);
 let promptArg = null;
 let dangerMode = false;
 let showHelp = false;
+let serverMode = false;
+let backgroundMode = false;
+let permissionModeFlag = null;
 
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
@@ -18,6 +21,15 @@ for (let i = 0; i < args.length; i++) {
     showHelp = true;
   } else if (arg === '--danger') {
     dangerMode = true;
+  } else if (arg === '--server') {
+    serverMode = true;
+  } else if (arg === '--background') {
+    backgroundMode = true;
+  } else if (arg === '--permission-mode' || arg === '-m') {
+    if (i + 1 < args.length) {
+      permissionModeFlag = args[i + 1];
+      i++;
+    }
   } else if (arg === '--prompt' || arg === '-p') {
     if (i + 1 < args.length) {
       promptArg = args.slice(i + 1).join(' ');
@@ -31,13 +43,14 @@ if (showHelp) {
 7coder — Claude Code style assistant with Ralph Wiggum loop + full tool calling
 
 Usage:
-  node index.js                          → Interactive REPL (default)
-  node index.js --prompt "your task here" → Non-interactive (runs once and exits)
-  node index.js -p "your task here"
-  node index.js --danger                 → Disable ALL command confirmations
-  node index.js --prompt "task" --danger → Dangerous non-interactive mode
+  node index.js → Interactive REPL (default)
+  node index.js --prompt "your task" → Non-interactive
+  node index.js --server → HTTP OpenAI endpoint (any UI)
+  node index.js --background --prompt "task" → Background daemon
+  node index.js --danger → Bypass all approvals
+  node index.js --permission-mode=auto → LLM auto-approval
 
-Flags can be combined. REPL is still fully supported.
+Flags can be combined.
 `);
   process.exit(0);
 }
@@ -72,7 +85,8 @@ process.chdir(launchDir);
 console.log(`✅ 7coder cd'ed to: ${launchDir}`);
 
 const DANGER_MODE = dangerMode;
-const INTERACTIVE = !promptArg;
+const INTERACTIVE = !promptArg && !serverMode && !backgroundMode;
+
 
 if (DANGER_MODE) {
   console.log('⚠️  DANGER MODE ENABLED — All CLI commands will run WITHOUT approval (within reason)!');
@@ -703,6 +717,18 @@ function startHttpServer() {
 
 // ====================== RUN MODE ======================
 async function main() {
+    // Background/daemon fix: spawn detached child and exit immediately
+    if (backgroundMode && promptArg) {
+      console.log('🔄 Starting background/daemon mode...');
+      const child = child_process.spawn(process.argv[0], process.argv.slice(1).filter(a => a !== '--background'), {
+        detached: true,
+        stdio: 'ignore',
+        cwd: launchDir
+      });
+      child.unref();
+      console.log('✅ Background process started (terminal freed).');
+      process.exit(0);
+    }
     if (promptArg) {
         // NON-INTERACTIVE MODE
         console.log(`\n🚀 7coder non-interactive mode`);
