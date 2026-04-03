@@ -1,10 +1,11 @@
 {
   "name": "7coder",
-  "version": "1.0.1",
-  "description": "7coder — Claude-style coding assistant with Ralph Wiggum self-iteration loop. Now explicitly cds to your launch directory (exactly like Claude Code). Node.js 13 + Windows 7 compatible.",
+  "version": "2.0.0",
+  "description": "7coder — Full clean-room Claude Code replacement. Advanced tools (agents, MCP, computer use, cron, workflows), sophisticated permission system (default/auto/bypass/denial), near-prompt-injection-proof computer use, HTTP OpenAI-compatible endpoint for any UI, Ralph Wiggum loop, 7CODER.md findings file, anti-frustration detection. Zero extra dependencies. Broad compatibility: Windows 7/Node.js 13+ to modern systems.",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "server": "node index.js --server"
   },
   "engines": {
     "node": ">=13.0.0"
