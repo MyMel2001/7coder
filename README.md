@@ -96,7 +96,7 @@ Gives the AI real mouse/keyboard/screenshot control on Windows 7, Windows 10/11,
 - **7CODER.md** — AI automatically creates and updates this file in the project root with all findings and progress.
 - **Ralph Wiggum self-iteration loop** — still available (`ENABLE_RALPH_MODE=true`)
 - **Anti-frustration system** — detects when you’re mad and makes the model extra calm/helpful
-- **HTTP OpenAI endpoint** — works with any UI (Cursor, VS Code Continue, etc.)
+- **HTTP OpenAI endpoint** — works with any UI (Open WebUI, VS Code w/ Cline, etc.)
 - **In-memory agents, background tasks, cron jobs, MCP resources** — fully working
 - **Light model** for risk checks, explanations, and moderation (saves tokens)
 
