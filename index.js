@@ -14,6 +14,7 @@ let showHelp = false;
 let serverMode = false;
 let backgroundMode = false;
 let permissionModeFlag = null;
+let p = '';
 
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
@@ -741,26 +742,31 @@ async function main() {
         console.log('\n🚀 Welcome to 7coder (interactive REPL)');
         if (ENABLE_RALPH_MODE) console.log('🎉 Ralph Wiggum mode ENABLED');
         if (DANGER_MODE) console.log('⚠️ DANGER MODE ENABLED');
-        console.log('Type your task or "exit" to quit.\n');
+        console.log('Type your task followed by a new line then "/done"\n')
+        console.log('to start a new task, or type "/bye" to quit.\n');
       
         rl.prompt();
       
         rl.on('line', async (input) => {
           const trimmed = input.trim();
-          if (trimmed.toLowerCase() === 'exit') {
+          if (trimmed.toLowerCase() === '/bye') {
             console.log('👋 Goodbye!');
             rl.close();
             return;
           }
+          
           if (!trimmed) {
             rl.prompt();
             return;
           }
       
-          messages.push({ role: 'user', content: trimmed });
-          console.log('7coder is thinking...');
-          await executeTask();
+          if (input == '/done') {
+            messages.push({ role: 'user', content: trimmed });
+            console.log('7coder is thinking...');
+            await executeTask();
+          }
           rl.prompt();
+          
         });
       }
 }
