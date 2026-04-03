@@ -11,6 +11,24 @@ const fs = require('fs');
 const child_process = require('child_process');
 const http = require('http');
 
+// 1. Identify where the script lives (for .env) and where we are (for work)
+const scriptDir = path.dirname(process.argv[1]);
+const launchDir = process.cwd(); 
+
+// 2. Load .env using an absolute path to the script's directory
+// This ensures variables are loaded even if we haven't 'cd'ed there yet.
+require('dotenv').config({ path: path.join(scriptDir, '.env') });
+
+// 3. (Optional) If you want to force the process to a specific sub-directory 
+// provided via arguments, do it now. Otherwise, stay in launchDir.
+try {
+  process.chdir(launchDir);
+  console.log(`✅ 7coder workspace set to: ${process.cwd()}`);
+} catch (err) {
+  console.error(`❌ Could not switch to directory: ${launchDir}`);
+  process.exit(1);
+}
+
 // ====================== CLI ARGUMENT PARSING (Node 13 safe) ======================
 const args = process.argv.slice(2);
 let promptArg = null;
