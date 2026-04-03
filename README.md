@@ -52,5 +52,5 @@ API: Any OpenAI-compatible endpoint
 
 ## Why 7coder?
 Because real Claude Code is very expensive.
-This is the free, Windows-friendly, more open version that actually does everything most of Claude Code's functionality but compatible with Windows 7
+This is the free, Windows-friendly, more open version that actually does most of Claude Code's functionality but compatible with Windows 7
 Vibe coded with love (and a lot of debugging on Windows 7) by 😃MyMel2001.
