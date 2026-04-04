@@ -68,7 +68,8 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_ENDPOINT = process.env.OPENAI_ENDPOINT || 'https://api.openai.com/v1';
 const ENABLE_RALPH_MODE = process.env.ENABLE_CLAUDE_LIKE_RALPH_WIGGUM_MODE === 'true';
 const MAX_RETRIES = parseInt(process.env.MAX_ATTEMPT_RETRIES, 10) || 3;
-const MODEL = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
+const HEAVY_MODEL = process.env.HEAVY_MODEL || 'gpt-4o-mini';
+const LIGHT_MODEL = process.env.LIGHT_MODEL || 'gpt-3.5-turbo';
 const TEMPERATURE = parseFloat(process.env.TEMPERATURE) || 0.7;
 const MAX_TOKENS = parseInt(process.env.MAX_TOKENS, 10) || 2048;
 const PERMISSION_MODE = permissionModeFlag || process.env.PERMISSION_MODE || (dangerMode ? 'bypass' : 'default');
@@ -615,29 +616,26 @@ async function processWithTools(currentMessages) {
   }
 }
 
-async function callOpenAI(currentMessages) {
+async function callOpenAI(currentMessages, options = {}) {
+  const { model = HEAVY_MODEL, useTools = true, toolChoice = "auto", temperature = TEMPERATURE, maxTokens = MAX_TOKENS } = options;
   const base = OPENAI_ENDPOINT.replace(/\/+$/, '');
   const url = `${base}/chat/completions`;
+  const payload = { model, messages: currentMessages, temperature, max_tokens: maxTokens };
+  if (useTools) payload.tools = tools;
+  if (useTools) payload.tool_choice = toolChoice;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const response = await axios.post(url, {
-        model: MODEL,
-        messages: currentMessages,
-        temperature: TEMPERATURE,
-        max_tokens: MAX_TOKENS,
-        tools: tools,
-        tool_choice: "auto"
-      }, {
+      const response = await axios.post(url, payload, {
         headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
         timeout: 4200000,
       });
       return response.data.choices[0];
     } catch (error) {
-      const msg = (error.response && error.response.data && error.response.data.error && error.response.data.error.message) || error.message;
+      const msg = (error.response?.data?.error?.message) || error.message;
       console.error(`⚠️ API attempt ${attempt}/${MAX_RETRIES} failed: ${msg}`);
       if (attempt === MAX_RETRIES) throw new Error('Max retries reached.');
-      await new Promise(resolve => setTimeout(resolve, 1200 * attempt));
+      await new Promise(r => setTimeout(r, 1200 * attempt));
     }
   }
 }
