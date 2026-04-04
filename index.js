@@ -743,7 +743,7 @@ async function main() {
         console.log('\n🚀 Welcome to 7coder (interactive REPL)');
         if (ENABLE_RALPH_MODE) console.log('🎉 Ralph Wiggum mode ENABLED');
         if (DANGER_MODE) console.log('⚠️ DANGER MODE ENABLED');
-        console.log('Type your task followed by a new line then "/done"')
+        console.log('Type your task followed by a new line then "/execute-task-now"')
         console.log('to start a new task, or type "/bye" to quit.\n');
       
         rl.prompt();
@@ -761,7 +761,7 @@ async function main() {
             return;
           }
       
-          if (input == '/done') {
+          if (input == '/execute-task-now') {
             messages.push({ role: 'user', content: trimmed });
             console.log('7coder is thinking...');
             await executeTask();
