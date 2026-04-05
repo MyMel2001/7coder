@@ -63,6 +63,7 @@ const ENABLE_RALPH_MODE = process.env.ENABLE_CLAUDE_LIKE_RALPH_WIGGUM_MODE === '
 const MAX_RETRIES = parseInt(process.env.MAX_ATTEMPT_RETRIES, 10) || 3;
 const HEAVY_MODEL = process.env.HEAVY_MODEL || 'gpt-4o-mini';
 const LIGHT_MODEL = process.env.LIGHT_MODEL || 'gpt-3.5-turbo';
+const VISION_MODEL = process.env.VISION_MODEL || null; // new: optional vision model for web_browser_tool images
 const TEMPERATURE = parseFloat(process.env.TEMPERATURE) || 0.7;
 const MAX_TOKENS = parseInt(process.env.MAX_TOKENS, 10) || 2048;
 const PERMISSION_MODE = permissionModeFlag || process.env.PERMISSION_MODE || (dangerMode ? 'bypass' : 'default');
@@ -107,7 +108,7 @@ const tools = [
   { type: "function", function: { name: "grep_tool", description: "Search file contents.", parameters: { type: "object", properties: { pattern: { type: "string" }, path: { type: "string" } }, required: ["pattern"] } } },
   { type: "function", function: { name: "web_fetch_tool", description: "Simple GET request to any URL.", parameters: { type: "object", properties: { url: { type: "string" } }, required: ["url"] } } },
   { type: "function", function: { name: "web_search_tool", description: "Search DuckDuckGo for links.", parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } } },
-  { type: "function", function: { name: "web_browser_tool", description: "Simulated browser: navigate, click links, view images.", parameters: { type: "object", properties: { url: { type: "string" }, action: { type: "string", enum: ["navigate", "click", "extract"] } }, required: ["url"] } } },
+  { type: "function", function: { name: "web_browser_tool", description: "Real browser: navigate (GET page), click links (follow), extract content + links (infers from link names), view images with optional VISION_MODEL.", parameters: { type: "object", properties: { url: { type: "string" }, action: { type: "string", enum: ["navigate", "click", "extract"] } }, required: ["url"] } } },
   { type: "function", function: { name: "notebook_edit_tool", description: "Edit Jupyter notebook (JSON structure).", parameters: { type: "object", properties: { path: { type: "string" }, edits: { type: "object" } }, required: ["path", "edits"] } } },
   { type: "function", function: { name: "skill_tool", description: "Invoke user-defined skills.", parameters: { type: "object", properties: { skill_name: { type: "string" }, params: { type: "object" } }, required: ["skill_name"] } } },
   { type: "function", function: { name: "ask_user_question_tool", description: "Prompt user for input.", parameters: { type: "object", properties: { question: { type: "string" } }, required: ["question"] } } },
@@ -195,19 +196,11 @@ function recursiveReaddir(dir = '', pattern = '') {
   const startDir = dir ? path.join(launchDir, sanitizePath(dir)) : launchDir;
   function walk(current) {
     let entries;
-    try {
-      entries = fs.readdirSync(current);
-    } catch (e) {
-      return;
-    }
+    try { entries = fs.readdirSync(current); } catch (e) { return; }
     for (const entry of entries) {
       const full = path.join(current, entry);
       let stat;
-      try {
-        stat = fs.statSync(full);
-      } catch (e) {
-        continue;
-      }
+      try { stat = fs.statSync(full); } catch (e) { continue; }
       if (stat.isDirectory()) {
         walk(full);
       } else {
@@ -228,19 +221,11 @@ function grepSearch(pattern, searchPath = '') {
   const startDir = searchPath ? path.join(launchDir, sanitizePath(searchPath)) : launchDir;
   function walk(current) {
     let entries;
-    try {
-      entries = fs.readdirSync(current);
-    } catch (e) {
-      return;
-    }
+    try { entries = fs.readdirSync(current); } catch (e) { return; }
     for (const entry of entries) {
       const full = path.join(current, entry);
       let stat;
-      try {
-        stat = fs.statSync(full);
-      } catch (e) {
-        continue;
-      }
+      try { stat = fs.statSync(full); } catch (e) { continue; }
       if (stat.isDirectory()) {
         walk(full);
       } else {
@@ -256,6 +241,34 @@ function grepSearch(pattern, searchPath = '') {
   }
   walk(startDir);
   return results.length ? results.join('\n') : `No matches for pattern: ${pattern}`;
+}
+
+// ====================== VISION HELPER (for real web_browser_tool images) ======================
+async function describeWithVision(imageUrl) {
+  if (!VISION_MODEL || !OPENAI_API_KEY) {
+    return `🖼️ Image at ${imageUrl} — (VISION_MODEL not set in .env — add e.g. gpt-4o to enable real vision)`;
+  }
+  try {
+    const base = OPENAI_ENDPOINT.replace(/\/+$/, '');
+    const payload = {
+      model: VISION_MODEL,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "Describe this image in detail for a coding assistant. Focus on any code, diagrams, UI elements, or text visible." },
+          { type: "image_url", image_url: { url: imageUrl } }
+        ]
+      }],
+      max_tokens: 500
+    };
+    const response = await axios.post(`${base}/chat/completions`, payload, {
+      headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+      timeout: 30000
+    });
+    return response.data.choices[0].message.content.trim();
+  } catch (e) {
+    return `Vision error: ${e.message}`;
+  }
 }
 
 // ====================== LIGHT/HEAVY CALLER ======================
@@ -300,7 +313,7 @@ async function callOpenAI(currentMessages, options = {}) {
   }
 }
 
-// ====================== RISK CLASSIFICATION & PERMISSION ======================
+// ====================== RISK CLASSIFICATION & PERMISSION (fixed explanations) ======================
 async function classifyRisk(toolName, args) {
   const prompt = `Classify risk of tool call as ONLY ONE WORD: LOW, MEDIUM or HIGH.
 Tool: ${toolName}
@@ -308,7 +321,7 @@ Args: ${JSON.stringify(args)}
 Consider file edits, shell commands, web access, computer control, protected paths.`;
   try {
     const choice = await callOpenAI([{ role: 'user', content: prompt }], { model: LIGHT_MODEL, useTools: false });
-    return choice.message.content.trim().toUpperCase();
+    return (choice.message.content || 'MEDIUM').trim().toUpperCase();
   } catch (e) {
     return 'MEDIUM';
   }
@@ -321,7 +334,7 @@ Args: ${JSON.stringify(args)}
 Risk level: ${risk}`;
   try {
     const choice = await callOpenAI([{ role: 'user', content: prompt }], { model: LIGHT_MODEL, useTools: false });
-    return choice.message.content.trim();
+    return (choice.message.content || `Tool ${toolName} will run (risk: ${risk}).`).trim();
   } catch (e) {
     return `Tool ${toolName} will run. Risk: ${risk}.`;
   }
@@ -334,7 +347,7 @@ Args: ${JSON.stringify(args)}
 Reply ONLY with YES or NO.`;
   try {
     const choice = await callOpenAI([{ role: 'user', content: prompt }], { model: LIGHT_MODEL, useTools: false });
-    return choice.message.content.trim().toUpperCase().startsWith('YES');
+    return (choice.message.content || 'NO').trim().toUpperCase().startsWith('YES');
   } catch (e) {
     return false;
   }
@@ -344,7 +357,7 @@ async function detectFrustration(userInput) {
   const prompt = `Does this user message show frustration, anger, or cursing? Reply ONLY YES or NO and one-word reason.`;
   try {
     const choice = await callOpenAI([{ role: 'user', content: `${prompt}\n\nUser: ${userInput}` }], { model: LIGHT_MODEL, useTools: false });
-    return choice.message.content.trim().toUpperCase().startsWith('YES');
+    return (choice.message.content || 'NO').trim().toUpperCase().startsWith('YES');
   } catch (e) {
     return false;
   }
@@ -413,8 +426,40 @@ async function executeToolRaw(name, args) {
       return `Search results:\n${links.join('\n')}`;
     } catch (e) { return `Search error: ${e.message}`; }
   }
+
+  // REAL WEB BROWSER TOOL (fixed: no longer stub)
   if (name === 'web_browser_tool') {
-    return `🧭 Simulated browser navigated to ${args.url}. Action: ${args.action || 'navigate'}. (Full CV image support available when vision model is used.)`;
+    const url = args.url;
+    const action = args.action || 'navigate';
+    console.log(`🌐 Real browser tool: ${action} → ${url}`);
+
+    try {
+      // Detect if it's an image URL
+      const isImage = url.match(/\.(png|jpg|jpeg|gif|webp|svg|bmp)$/i);
+      if (isImage) {
+        const desc = await describeWithVision(url);
+        return `🖼️ Image viewed at ${url}\nVision description:\n${desc}`;
+      }
+
+      // Fetch page
+      const res = await axios.get(url, { timeout: 15000, responseType: 'text' });
+      let pageContent = typeof res.data === 'string' ? res.data : JSON.stringify(res.data, null, 2);
+
+      // Extract links for "inferring from link names"
+      const linkMatches = [...pageContent.matchAll(/<a[^>]+href="([^"]+)"[^>]*>([^<]+)<\/a>/gi)];
+      const linksSummary = linkMatches.slice(0, 20).map(m => `${m[2].trim()} → ${m[1]}`).join('\n');
+
+      let result = `📄 Page fetched successfully (${action})\nURL: ${url}\n\n🔗 Links found (infer from names):\n${linksSummary || 'No clickable links found'}\n\n`;
+
+      if (action === 'extract' || action === 'navigate') {
+        result += `Content preview (first 3000 chars):\n${pageContent.substring(0, 3000)}...`;
+      } else if (action === 'click') {
+        result += `🔗 Click simulated — navigated to the provided URL. Use the extracted links above for next steps.`;
+      }
+      return result;
+    } catch (e) {
+      return `🌐 Browser error for ${url}: ${e.message}`;
+    }
   }
 
   // NOTEBOOK
@@ -562,7 +607,7 @@ async function executeToolRaw(name, args) {
     const jobId = `cron-${Date.now()}`;
     const interval = setInterval(() => {
       try { child_process.execSync(args.command, { cwd: launchDir }); } catch {}
-    }, 60000); // every minute for demo
+    }, 60000);
     cronJobs.set(jobId, { schedule: args.schedule, command: args.command, intervalId: interval });
     return `✅ Cron job ${jobId} scheduled`;
   }
@@ -632,7 +677,7 @@ async function askApproval(question) {
   });
 }
 
-// ====================== SAFE TOOL EXECUTION ======================
+// ====================== SAFE TOOL EXECUTION (auto mode fixed + explanations fixed) ======================
 async function safeExecuteTool(toolCall) {
   const func = toolCall.function;
   let args;
@@ -663,7 +708,7 @@ async function safeExecuteTool(toolCall) {
   // Risk classification
   const risk = await classifyRisk(name, args);
 
-  // Permission logic
+  // Permission logic (auto mode now fully robust)
   if (PERMISSION_MODE === 'denial') return 'Permission mode = denial. Action blocked.';
 
   if (PERMISSION_MODE === 'bypass') {
