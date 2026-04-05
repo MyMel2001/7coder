@@ -1,7 +1,7 @@
 # 7coder
 **Full clean-room Claude Code replacement** for Windows 7 / Node.js 13+.
 
-**v2.1.0** — All tools are now 100% functional (agents, computer use, MCP, cron, background tasks, web tools, etc.)
+**v2.1.0** — All tools are now 100% functional and feature-complete (agents, computer use, MCP, cron, background tasks, web tools, etc.)
 
 ## System Requirements
 
