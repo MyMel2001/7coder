@@ -63,7 +63,7 @@ const ENABLE_RALPH_MODE = process.env.ENABLE_CLAUDE_LIKE_RALPH_WIGGUM_MODE === '
 const MAX_RETRIES = parseInt(process.env.MAX_ATTEMPT_RETRIES, 10) || 3;
 const HEAVY_MODEL = process.env.HEAVY_MODEL || 'gpt-4o-mini';
 const LIGHT_MODEL = process.env.LIGHT_MODEL || 'gpt-3.5-turbo';
-const VISION_MODEL = process.env.VISION_MODEL || null; // new: optional vision model for web_browser_tool images
+const VISION_MODEL = process.env.VISION_MODEL || null;
 const TEMPERATURE = parseFloat(process.env.TEMPERATURE) || 0.7;
 const MAX_TOKENS = parseInt(process.env.MAX_TOKENS, 10) || 2048;
 const PERMISSION_MODE = permissionModeFlag || process.env.PERMISSION_MODE || (dangerMode ? 'bypass' : 'default');
@@ -76,7 +76,6 @@ if (!OPENAI_API_KEY) {
   process.exit(1);
 }
 
-// === EXPLICIT CD TO USER'S CURRENT DIRECTORY ===
 process.chdir(launchDir);
 console.log(`✅ 7coder cd'ed to: ${launchDir}`);
 
@@ -243,7 +242,7 @@ function grepSearch(pattern, searchPath = '') {
   return results.length ? results.join('\n') : `No matches for pattern: ${pattern}`;
 }
 
-// ====================== VISION HELPER (for real web_browser_tool images) ======================
+// ====================== VISION HELPER ======================
 async function describeWithVision(imageUrl) {
   if (!VISION_MODEL || !OPENAI_API_KEY) {
     return `🖼️ Image at ${imageUrl} — (VISION_MODEL not set in .env — add e.g. gpt-4o to enable real vision)`;
@@ -313,7 +312,7 @@ async function callOpenAI(currentMessages, options = {}) {
   }
 }
 
-// ====================== RISK CLASSIFICATION & PERMISSION (fixed explanations) ======================
+// ====================== RISK CLASSIFICATION & PERMISSION ======================
 async function classifyRisk(toolName, args) {
   const prompt = `Classify risk of tool call as ONLY ONE WORD: LOW, MEDIUM or HIGH.
 Tool: ${toolName}
@@ -353,19 +352,8 @@ Reply ONLY with YES or NO.`;
   }
 }
 
-async function detectFrustration(userInput) {
-  const prompt = `Does this user message show frustration, anger, or cursing? Reply ONLY YES or NO and one-word reason.`;
-  try {
-    const choice = await callOpenAI([{ role: 'user', content: `${prompt}\n\nUser: ${userInput}` }], { model: LIGHT_MODEL, useTools: false });
-    return (choice.message.content || 'NO').trim().toUpperCase().startsWith('YES');
-  } catch (e) {
-    return false;
-  }
-}
-
 // ====================== TOOL EXECUTION ======================
 async function executeToolRaw(name, args) {
-  // CORE FILE TOOLS
   if (name === 'read_file') {
     const fullPath = path.join(launchDir, sanitizePath(args.path || ''));
     try { return fs.readFileSync(fullPath, 'utf8'); } catch (e) { return `Read error: ${e.message}`; }
@@ -388,7 +376,6 @@ async function executeToolRaw(name, args) {
     } catch (e) { return `Append error: ${e.message}`; }
   }
 
-  // SHELL TOOLS
   if (['run_command','bash_tool','powershell_tool'].includes(name)) {
     let cmd = args.command || '';
     if (DANGER_MODE || PERMISSION_MODE === 'bypass') console.log(`⚠️ Running: ${cmd}`);
@@ -402,7 +389,6 @@ async function executeToolRaw(name, args) {
     }
   }
 
-  // FILE SEARCH
   if (name === 'glob_tool') {
     const files = recursiveReaddir(args.directory, args.pattern);
     return files.length ? files.join('\n') : 'No files matched';
@@ -411,7 +397,6 @@ async function executeToolRaw(name, args) {
     return grepSearch(args.pattern, args.path);
   }
 
-  // WEB TOOLS
   if (name === 'web_fetch_tool') {
     try {
       const res = await axios.get(args.url, { timeout: 10000 });
@@ -427,25 +412,21 @@ async function executeToolRaw(name, args) {
     } catch (e) { return `Search error: ${e.message}`; }
   }
 
-  // REAL WEB BROWSER TOOL (fixed: no longer stub)
   if (name === 'web_browser_tool') {
     const url = args.url;
     const action = args.action || 'navigate';
     console.log(`🌐 Real browser tool: ${action} → ${url}`);
 
     try {
-      // Detect if it's an image URL
       const isImage = url.match(/\.(png|jpg|jpeg|gif|webp|svg|bmp)$/i);
       if (isImage) {
         const desc = await describeWithVision(url);
         return `🖼️ Image viewed at ${url}\nVision description:\n${desc}`;
       }
 
-      // Fetch page
       const res = await axios.get(url, { timeout: 15000, responseType: 'text' });
       let pageContent = typeof res.data === 'string' ? res.data : JSON.stringify(res.data, null, 2);
 
-      // Extract links for "inferring from link names"
       const linkMatches = [...pageContent.matchAll(/<a[^>]+href="([^"]+)"[^>]*>([^<]+)<\/a>/gi)];
       const linksSummary = linkMatches.slice(0, 20).map(m => `${m[2].trim()} → ${m[1]}`).join('\n');
 
@@ -462,7 +443,6 @@ async function executeToolRaw(name, args) {
     }
   }
 
-  // NOTEBOOK
   if (name === 'notebook_edit_tool') {
     try {
       const nbPath = path.join(launchDir, sanitizePath(args.path));
@@ -474,19 +454,16 @@ async function executeToolRaw(name, args) {
     } catch (e) { return `Notebook error: ${e.message}`; }
   }
 
-  // SKILL TOOL
   if (name === 'skill_tool') {
     return `✅ Custom skill "${args.skill_name}" executed with params: ${JSON.stringify(args.params || {})}`;
   }
 
-  // ASK USER
   if (name === 'ask_user_question_tool') {
     if (DANGER_MODE || PERMISSION_MODE === 'bypass') return 'Question skipped in non-interactive mode';
     const answer = await new Promise(resolve => rl.question(`🗣️ ${args.question}\nAnswer: `, resolve));
     return `User answered: ${answer}`;
   }
 
-  // BRIEF TOOL
   if (name === 'brief_tool') {
     const summaryPath = path.join(launchDir, `${args.folder}.summary`);
     const files = recursiveReaddir(args.folder);
@@ -495,7 +472,6 @@ async function executeToolRaw(name, args) {
     return `Summary written to ${summaryPath}`;
   }
 
-  // AGENT TOOLS
   if (name === 'agent_tool') {
     const agentId = `agent-${Date.now()}`;
     activeAgents.set(agentId, { name: args.name, task: args.task, messages: [] });
@@ -516,7 +492,6 @@ async function executeToolRaw(name, args) {
     return `✅ Team operation ${name} completed (in-memory)`;
   }
 
-  // TASK TOOLS
   if (name === 'task_create_tool') {
     const taskId = `task-${Date.now()}`;
     const timer = setTimeout(() => {
@@ -550,14 +525,12 @@ async function executeToolRaw(name, args) {
     return `✅ Task ${args.task_id} stopped`;
   }
 
-  // TODO
   if (name === 'todo_write_tool') {
     const todoPath = path.join(launchDir, 'TODO.md');
     fs.appendFileSync(todoPath, `\n## ${new Date().toISOString()}\n${args.content}\n`, 'utf8');
     return '✅ TODO.md updated';
   }
 
-  // MCP
   if (name === 'list_mcp_resources_tool') {
     return fs.readdirSync(mcpResourcesDir).join('\n') || 'No MCP resources';
   }
@@ -569,29 +542,24 @@ async function executeToolRaw(name, args) {
     return `✅ MCP operation ${name} completed (file-based in .mcp)`;
   }
 
-  // SLEEP
   if (name === 'sleep_tool') {
     const ms = parseInt(args.ms) || 1000;
     await new Promise(r => setTimeout(r, ms));
     return `✅ Slept ${ms}ms`;
   }
 
-  // SNIP
   if (name === 'snip_tool') {
     return messages.slice(args.start || 0, args.end || messages.length).map(m => JSON.stringify(m)).join('\n');
   }
 
-  // TOOL SEARCH
   if (name === 'tool_search_tool') {
     return tools.map(t => t.function.name).join('\n');
   }
 
-  // MONITOR
   if (name === 'monitor_tool') {
     return `MCP servers monitored. Active agents: ${activeAgents.size}, Tasks: ${backgroundTasks.size}`;
   }
 
-  // GIT WORKTREE
   if (name === 'enter_worktree_tool') {
     try {
       child_process.execSync(`git worktree add ${args.path || 'worktree'}`, { cwd: launchDir });
@@ -602,7 +570,6 @@ async function executeToolRaw(name, args) {
     return '✅ Exited worktree (stub - use run_command for full git)';
   }
 
-  // CRON
   if (name === 'schedule_cron_tool' || name === 'cron_create_tool') {
     const jobId = `cron-${Date.now()}`;
     const interval = setInterval(() => {
@@ -621,27 +588,22 @@ async function executeToolRaw(name, args) {
     return Array.from(cronJobs.keys()).join('\n') || 'No cron jobs';
   }
 
-  // REMOTE / WORKFLOW
   if (name === 'remote_trigger_tool' || name === 'workflow_tool') {
     return `✅ ${name} executed successfully`;
   }
 
-  // SYNTHETIC OUTPUT
   if (name === 'synthetic_output_tool') {
     return `Structured output generated:\n${JSON.stringify({ result: "success", data: "dynamic JSON" }, null, 2)}`;
   }
 
-  // PROMPT FROM FILE
   if (name === 'prompt_from_file') {
     try { return fs.readFileSync(path.join(launchDir, sanitizePath(args.file)), 'utf8'); } catch { return 'File not found'; }
   }
 
-  // AUTO APPROVAL RETURN
   if (name === 'auto_approval_return') {
     return args.description || 'Auto-approval handover complete';
   }
 
-  // COMPUTER USE (cross-platform, Windows 7 safe)
   if (name === 'computer_use') {
     const action = args.action;
     console.log(`🖥️ Computer use: ${action}`);
@@ -677,7 +639,7 @@ async function askApproval(question) {
   });
 }
 
-// ====================== SAFE TOOL EXECUTION (auto mode fixed + explanations fixed) ======================
+// ====================== SAFE TOOL EXECUTION ======================
 async function safeExecuteTool(toolCall) {
   const func = toolCall.function;
   let args;
@@ -685,7 +647,6 @@ async function safeExecuteTool(toolCall) {
 
   const name = func.name;
 
-  // Path sanitization
   if (['read_file', 'write_file', 'append_file', 'notebook_edit_tool', 'glob_tool', 'grep_tool', 'prompt_from_file'].includes(name)) {
     if (args.path) {
       try { args.path = sanitizePath(args.path); } catch (e) { return `Security: ${e.message}`; }
@@ -695,36 +656,33 @@ async function safeExecuteTool(toolCall) {
     }
   }
 
-  // Super-dangerous command block
   if (['run_command','bash_tool','powershell_tool'].includes(name)) {
     if (isSuperDangerous(args.command)) return 'BLOCKED: Super-dangerous command prevented (even in danger mode).';
   }
 
-  // Computer use guard
   if (name === 'computer_use' && !ENABLE_COMPUTER_USE) {
     return 'Computer use is disabled in .env (ENABLE_COMPUTER_USE=false).';
   }
 
-  // Risk classification
   const risk = await classifyRisk(name, args);
 
-  // Permission logic (auto mode now fully robust)
   if (PERMISSION_MODE === 'denial') return 'Permission mode = denial. Action blocked.';
 
   if (PERMISSION_MODE === 'bypass') {
-    // still respect super-dangerous (already checked)
+    // respect super-dangerous (already checked)
   } else if (PERMISSION_MODE === 'auto') {
     const safe = await isAutoApprovalSafe(name, args, risk);
     if (!safe) return `Auto-approval declined by light model. Risk: ${risk}.`;
   } else {
-    // default = interactive
     const expl = await getPermissionExplanation(name, args, risk);
     console.log(`\n🔐 ${expl}`);
     const approved = await askApproval('Execute this tool? (y/n) ');
     if (!approved) return 'User declined the tool action.';
   }
 
-  // Execute
+  // FIXED: log only AFTER approval / auto-approval (this fixes the "Using X tool(s)" timing bug)
+  console.log(`🔧 Executing approved tool: ${name}`);
+
   return await executeToolRaw(name, args);
 }
 
@@ -735,7 +693,7 @@ async function processWithTools(currentMessages) {
     const assistantMsg = choice.message;
     currentMessages.push(assistantMsg);
     if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
-      console.log(`🔧 Using ${assistantMsg.tool_calls.length} tool(s)...`);
+      // Removed the early "Using X tool(s)..." log — now logged inside safeExecuteTool AFTER approval
       for (const tc of assistantMsg.tool_calls) {
         const result = await safeExecuteTool(tc);
         currentMessages.push({ role: 'tool', tool_call_id: tc.id, content: result });
@@ -767,6 +725,12 @@ async function executeTask() {
         console.log(`🔄 Ralph Wiggum Loop — Iteration ${attempt}: ${displayReply.substring(0, 120)}${displayReply.length > 120 ? '...' : ''}`);
       }
     }
+
+    // FIXED: 7CODER.md is now ALWAYS created/updated at the end of every task (even if model forgets)
+    const mdPath = path.join(launchDir, '7CODER.md');
+    const update = `\n\n## 7coder Update — ${new Date().toISOString()}\n\n${displayReply}\n\n`;
+    fs.appendFileSync(mdPath, update);
+    console.log('✅ 7CODER.md automatically updated with latest findings');
 
     console.log(`\n7coder: ${displayReply}`);
   } catch (err) {
@@ -828,7 +792,6 @@ const rl = readline.createInterface({
 
 // ====================== MAIN ======================
 async function main() {
-  // Background daemon
   if (backgroundMode && promptArg) {
     console.log('🔄 Starting background/daemon mode...');
     const child = child_process.spawn(process.argv[0], process.argv.slice(1).filter(a => a !== '--background'), {
@@ -842,7 +805,6 @@ async function main() {
   }
 
   if (promptArg) {
-    // NON-INTERACTIVE MODE
     console.log(`\n🚀 7coder non-interactive mode`);
     console.log(`Task: ${promptArg}`);
     messages.push({ role: 'user', content: promptArg });
@@ -853,7 +815,6 @@ async function main() {
       process.exit(0);
     }
   } else {
-    // INTERACTIVE REPL
     console.log('\n🚀 Welcome to 7coder (interactive REPL)');
     if (ENABLE_RALPH_MODE) console.log('🎉 Ralph Wiggum mode ENABLED');
     if (DANGER_MODE) console.log('⚠️ DANGER MODE ENABLED');
