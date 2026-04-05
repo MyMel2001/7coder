@@ -3,8 +3,7 @@ const readline = require('readline');
 const path = require('path');
 const fs = require('fs');
 const child_process = require('child_process');
-const { mainModule } = require('process');
-const http = require('http')
+const http = require('http');
 
 // ====================== CLI ARGUMENT PARSING (Node 13 safe) ======================
 const args = process.argv.slice(2);
@@ -14,7 +13,6 @@ let showHelp = false;
 let serverMode = false;
 let backgroundMode = false;
 let permissionModeFlag = null;
-let p = '';
 
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
@@ -41,27 +39,22 @@ for (let i = 0; i < args.length; i++) {
 
 if (showHelp) {
   console.log(`
-7coder — Claude Code style assistant with Ralph Wiggum loop + full tool calling
+7coder — Fixed & fully working Claude Code style assistant
 
 Usage:
-  node index.js → Interactive REPL (default)
+  node index.js → Interactive REPL (multi-line tasks supported)
   node index.js --prompt "your task" → Non-interactive
-  node index.js --server → HTTP OpenAI endpoint (any UI)
-  node index.js --background --prompt "task" → Background daemon
-  node index.js --danger → Bypass all approvals
-  node index.js --permission-mode=auto → LLM auto-approval
-
-Flags can be combined.
+  node index.js --server → HTTP OpenAI endpoint
+  node index.js --background --prompt "task" → Background
+  node index.js --danger → Bypass approvals
+  node index.js --permission-mode=auto → Auto approval
 `);
   process.exit(0);
 }
 
-// == SET LAUNCHDIR HERE ! ! ! ==
+// ====================== SETUP ======================
 const launchDir = process.cwd();
-
-// == cd to script's dir so that we can find .env file ==
 process.chdir(path.resolve(path.dirname(process.argv[1])));
-
 require('dotenv').config();
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -82,13 +75,19 @@ if (!OPENAI_API_KEY) {
   process.exit(1);
 }
 
-// === EXPLICIT CD TO USER'S CURRENT DIRECTORY (Claude Code style) ===
+// === EXPLICIT CD TO USER'S CURRENT DIRECTORY ===
 process.chdir(launchDir);
 console.log(`✅ 7coder cd'ed to: ${launchDir}`);
 
+// Global state
+const activeAgents = new Map();
+const backgroundTasks = new Map();
+const cronJobs = new Map();
+const mcpResourcesDir = path.join(launchDir, '.mcp');
+fs.mkdirSync(mcpResourcesDir, { recursive: true });
+
 const DANGER_MODE = dangerMode;
 const INTERACTIVE = !promptArg && !serverMode && !backgroundMode;
-
 
 if (DANGER_MODE) {
   console.log('⚠️  DANGER MODE ENABLED — All CLI commands will run WITHOUT approval (within reason)!');
@@ -145,8 +144,7 @@ const tools = [
   { type: "function", function: { name: "computer_use", description: "Cross-platform full computer use (mouse/keyboard/screenshot).", parameters: { type: "object", properties: { action: { type: "string", enum: ["screenshot", "mouse_move", "click", "type_text", "press_key"] }, x: { type: "number" }, y: { type: "number" }, text: { type: "string" }, key: { type: "string" } }, required: ["action"] } } }
 ];
 
-
-// ====================== SYSTEM PROMPT (Claude Code style + all new features) ======================
+// ====================== SYSTEM PROMPT ======================
 const systemPrompt = `You are 7coder, a helpful, honest, and harmless AI coding assistant — a clean-room full replacement for Claude Code.
 You have full tool access including agent spawning, web tools, computer use, MCP, cron, tasks, and more.
 You ALWAYS create/update 7CODER.md in the project root with any findings, discoveries, or progress using the write_file tool.
@@ -167,6 +165,98 @@ Use tools aggressively when needed. After tools, give clear final answer.
 Create 7CODER.md early with your findings.`;
 
 let messages = [{ role: 'system', content: systemPrompt }];
+
+// ====================== HELPER FUNCTIONS (Node 13 + Windows 7 safe) ======================
+function sanitizePath(userPath) {
+  if (!userPath) return '';
+  try {
+    const resolved = path.resolve(launchDir, userPath);
+    if (resolved !== launchDir && !resolved.startsWith(launchDir + path.sep)) {
+      throw new Error('Path traversal blocked');
+    }
+    return path.relative(launchDir, resolved);
+  } catch (e) {
+    throw new Error('Security: ' + e.message);
+  }
+}
+
+function isSuperDangerous(cmd) {
+  if (!cmd) return false;
+  const lower = cmd.toLowerCase();
+  const dangerousPatterns = [
+    'rm -rf /', 'rm -rf *', 'format c:', 'dd if=', 'mkfs', 'shutdown', '> /dev', 'del /f /q c:\\',
+    'rd /s /q c:\\', 'rmdir /s /q'
+  ];
+  return dangerousPatterns.some(p => lower.includes(p));
+}
+
+function recursiveReaddir(dir = '', pattern = '') {
+  const results = [];
+  const startDir = dir ? path.join(launchDir, sanitizePath(dir)) : launchDir;
+  function walk(current) {
+    let entries;
+    try {
+      entries = fs.readdirSync(current);
+    } catch (e) {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(current, entry);
+      let stat;
+      try {
+        stat = fs.statSync(full);
+      } catch (e) {
+        continue;
+      }
+      if (stat.isDirectory()) {
+        walk(full);
+      } else {
+        const rel = path.relative(launchDir, full);
+        const regexPattern = pattern ? pattern.replace(/\*/g, '.*').replace(/\?/g, '.') : '';
+        if (!pattern || entry.match(new RegExp(regexPattern))) {
+          results.push(rel);
+        }
+      }
+    }
+  }
+  walk(startDir);
+  return results;
+}
+
+function grepSearch(pattern, searchPath = '') {
+  const results = [];
+  const startDir = searchPath ? path.join(launchDir, sanitizePath(searchPath)) : launchDir;
+  function walk(current) {
+    let entries;
+    try {
+      entries = fs.readdirSync(current);
+    } catch (e) {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(current, entry);
+      let stat;
+      try {
+        stat = fs.statSync(full);
+      } catch (e) {
+        continue;
+      }
+      if (stat.isDirectory()) {
+        walk(full);
+      } else {
+        try {
+          const content = fs.readFileSync(full, 'utf8');
+          if (new RegExp(pattern).test(content)) {
+            const rel = path.relative(launchDir, full);
+            results.push(`${rel}: matches "${pattern}"`);
+          }
+        } catch (e) {}
+      }
+    }
+  }
+  walk(startDir);
+  return results.length ? results.join('\n') : `No matches for pattern: ${pattern}`;
+}
 
 // ====================== LIGHT/HEAVY CALLER ======================
 async function callOpenAI(currentMessages, options = {}) {
@@ -199,7 +289,10 @@ async function callOpenAI(currentMessages, options = {}) {
       });
       return response.data.choices[0];
     } catch (error) {
-      const msg = (error.response?.data?.error?.message) || error.message;
+      let msg = error.message;
+      if (error.response && error.response.data && error.response.data.error && error.response.data.error.message) {
+        msg = error.response.data.error.message;
+      }
       console.error(`⚠️ API attempt ${attempt}/${MAX_RETRIES} failed: ${msg}`);
       if (attempt === MAX_RETRIES) throw new Error('Max retries reached.');
       await new Promise(r => setTimeout(r, 1200 * attempt));
@@ -207,7 +300,7 @@ async function callOpenAI(currentMessages, options = {}) {
   }
 }
 
-// ====================== RISK CLASSIFICATION & PERMISSION EXPLAINER (light model) ======================
+// ====================== RISK CLASSIFICATION & PERMISSION ======================
 async function classifyRisk(toolName, args) {
   const prompt = `Classify risk of tool call as ONLY ONE WORD: LOW, MEDIUM or HIGH.
 Tool: ${toolName}
@@ -247,25 +340,34 @@ Reply ONLY with YES or NO.`;
   }
 }
 
+async function detectFrustration(userInput) {
+  const prompt = `Does this user message show frustration, anger, or cursing? Reply ONLY YES or NO and one-word reason.`;
+  try {
+    const choice = await callOpenAI([{ role: 'user', content: `${prompt}\n\nUser: ${userInput}` }], { model: LIGHT_MODEL, useTools: false });
+    return choice.message.content.trim().toUpperCase().startsWith('YES');
+  } catch (e) {
+    return false;
+  }
+}
 
-// ====================== TOOLS ========================
+// ====================== TOOL EXECUTION ======================
 async function executeToolRaw(name, args) {
   // CORE FILE TOOLS
   if (name === 'read_file') {
-    const fullPath = path.join(launchDir, args.path || '');
+    const fullPath = path.join(launchDir, sanitizePath(args.path || ''));
     try { return fs.readFileSync(fullPath, 'utf8'); } catch (e) { return `Read error: ${e.message}`; }
   }
   if (name === 'write_file') {
     try {
-      const fullPath = path.join(launchDir, args.path || '');
+      const fullPath = path.join(launchDir, sanitizePath(args.path || ''));
       fs.mkdirSync(path.dirname(fullPath), { recursive: true });
       fs.writeFileSync(fullPath, args.content || '', 'utf8');
-      if (args.path.endsWith('7CODER.md')) return '✅ 7CODER.md updated with findings';
-      return `Written: ${path.relative(launchDir, args.path)}`;
+      if (args.path && args.path.endsWith('7CODER.md')) return '✅ 7CODER.md updated with findings';
+      return `Written: ${path.relative(launchDir, fullPath)}`;
     } catch (e) { return `Write error: ${e.message}`; }
   }
   if (name === 'append_file') {
-    const fullPath = path.join(launchDir, args.path);
+    const fullPath = path.join(launchDir, sanitizePath(args.path));
     try {
       fs.mkdirSync(path.dirname(fullPath), { recursive: true });
       fs.appendFileSync(fullPath, args.content || '', 'utf8');
@@ -318,7 +420,7 @@ async function executeToolRaw(name, args) {
   // NOTEBOOK
   if (name === 'notebook_edit_tool') {
     try {
-      const nbPath = args.path;
+      const nbPath = path.join(launchDir, sanitizePath(args.path));
       let notebook = JSON.parse(fs.readFileSync(nbPath, 'utf8'));
       if (args.edits.cells) notebook.cells = args.edits.cells;
       if (args.edits.metadata) notebook.metadata = { ...notebook.metadata, ...args.edits.metadata };
@@ -486,7 +588,7 @@ async function executeToolRaw(name, args) {
 
   // PROMPT FROM FILE
   if (name === 'prompt_from_file') {
-    try { return fs.readFileSync(args.file, 'utf8'); } catch { return 'File not found'; }
+    try { return fs.readFileSync(path.join(launchDir, sanitizePath(args.file)), 'utf8'); } catch { return 'File not found'; }
   }
 
   // AUTO APPROVAL RETURN
@@ -494,7 +596,7 @@ async function executeToolRaw(name, args) {
     return args.description || 'Auto-approval handover complete';
   }
 
-  // COMPUTER USE (cross-platform)
+  // COMPUTER USE (cross-platform, Windows 7 safe)
   if (name === 'computer_use') {
     const action = args.action;
     console.log(`🖥️ Computer use: ${action}`);
@@ -502,7 +604,7 @@ async function executeToolRaw(name, args) {
       const shotPath = path.join(launchDir, `screenshot_${Date.now()}.png`);
       try {
         if (process.platform === 'darwin') child_process.execSync(`screencapture -x "${shotPath}"`);
-        else if (process.platform === 'win32') child_process.execSync(`powershell -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{PRTSC}');"`, { stdio: 'ignore' });
+        else if (process.platform === 'win32') child_process.execSync(`powershell -Command "Add-Type -AssemblyName System.Drawing; $bmp = New-Object System.Drawing.Bitmap([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width, [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height); $gfx = [System.Drawing.Graphics]::FromImage($bmp); $gfx.CopyFromScreen(0,0,0,0,$bmp.Size); $bmp.Save('${shotPath}', [System.Drawing.Imaging.ImageFormat]::Png)"`, { stdio: 'ignore' });
         else child_process.execSync(`import -window root "${shotPath}" || scrot "${shotPath}"`, { stdio: 'ignore' });
       } catch {}
       return `Screenshot saved to ${shotPath}`;
@@ -518,24 +620,19 @@ async function executeToolRaw(name, args) {
 
   return `Unknown tool: ${name}`;
 }
-// ====================== ANTI-FRUSTRATION (light model) ======================
-async function detectFrustration(userInput) {
-  const prompt = `Does this user message show frustration, anger, or cursing? Reply ONLY YES or NO and one-word reason.`;
-  try {
-    const choice = await callOpenAI([{ role: 'user', content: `${prompt}\n\nUser: ${userInput}` }], { model: LIGHT_MODEL, useTools: false });
-    return choice.message.content.trim().toUpperCase().startsWith('YES');
-  } catch (e) {
+
+// ====================== APPROVAL ======================
+async function askApproval(question) {
+  if (!INTERACTIVE) {
+    console.log(`\n🔐 ${question} (auto-skipped in non-interactive mode)`);
     return false;
   }
-}
-
-// ====================== TOOL EXECUTION (with new permission system) ======================
-async function askApproval(question) {
   return new Promise(resolve => {
     rl.question(question, answer => resolve(answer.toLowerCase().startsWith('y')));
   });
 }
 
+// ====================== SAFE TOOL EXECUTION ======================
 async function safeExecuteTool(toolCall) {
   const func = toolCall.function;
   let args;
@@ -543,13 +640,18 @@ async function safeExecuteTool(toolCall) {
 
   const name = func.name;
 
-  // Path sanitization for any file-related tool
-  if (['read_file', 'write_file', 'append_file', 'notebook_edit_tool', 'glob_tool', 'grep_tool', 'prompt_from_file'].includes(name) && args.path) {
-    try { args.path = sanitizePath(args.path); } catch (e) { return `Security: ${e.message}`; }
+  // Path sanitization
+  if (['read_file', 'write_file', 'append_file', 'notebook_edit_tool', 'glob_tool', 'grep_tool', 'prompt_from_file'].includes(name)) {
+    if (args.path) {
+      try { args.path = sanitizePath(args.path); } catch (e) { return `Security: ${e.message}`; }
+    }
+    if (name === 'glob_tool' && args.directory) {
+      try { args.directory = sanitizePath(args.directory); } catch (e) { return `Security: ${e.message}`; }
+    }
   }
 
-  // Super-dangerous command block (even in bypass)
-  if (name === 'run_command' || name === 'bash_tool' || name === 'powershell_tool') {
+  // Super-dangerous command block
+  if (['run_command','bash_tool','powershell_tool'].includes(name)) {
     if (isSuperDangerous(args.command)) return 'BLOCKED: Super-dangerous command prevented (even in danger mode).';
   }
 
@@ -558,14 +660,14 @@ async function safeExecuteTool(toolCall) {
     return 'Computer use is disabled in .env (ENABLE_COMPUTER_USE=false).';
   }
 
-  // Risk classification (light model)
+  // Risk classification
   const risk = await classifyRisk(name, args);
 
   // Permission logic
   if (PERMISSION_MODE === 'denial') return 'Permission mode = denial. Action blocked.';
 
   if (PERMISSION_MODE === 'bypass') {
-    // still respect super-dangerous
+    // still respect super-dangerous (already checked)
   } else if (PERMISSION_MODE === 'auto') {
     const safe = await isAutoApprovalSafe(name, args, risk);
     if (!safe) return `Auto-approval declined by light model. Risk: ${risk}.`;
@@ -576,25 +678,10 @@ async function safeExecuteTool(toolCall) {
     const approved = await askApproval('Execute this tool? (y/n) ');
     if (!approved) return 'User declined the tool action.';
   }
-  executeToolRaw(toolCall)
+
+  // Execute
+  return await executeToolRaw(name, args);
 }
-
-
-// ====================== READLINE INTERFACE ======================
-
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-  prompt: 'You: '
-});
-
-// ====================== APPROVAL + TOOL EXECUTION ======================
-function askApproval(question) {
-  return new Promise(resolve => {
-    rl.question(question, answer => resolve(answer.toLowerCase().startsWith('y')));
-  });
-}
-
 
 // ====================== TOOL CALLING LOOP ======================
 async function processWithTools(currentMessages) {
@@ -602,45 +689,19 @@ async function processWithTools(currentMessages) {
     const choice = await callOpenAI(currentMessages);
     const assistantMsg = choice.message;
     currentMessages.push(assistantMsg);
-    if (assistantMsg.tool_calls) {
-        if (assistantMsg.tool_calls.length > 0) {
-            console.log(`🔧 Using ${assistantMsg.tool_calls.length} tool(s)...`);
-            for (const tc of assistantMsg.tool_calls) {
-              const result = await safeExecuteTool(tc);
-              currentMessages.push({ role: 'tool', tool_call_id: tc.id, content: result });
-            }
-            continue;
-          }
+    if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
+      console.log(`🔧 Using ${assistantMsg.tool_calls.length} tool(s)...`);
+      for (const tc of assistantMsg.tool_calls) {
+        const result = await safeExecuteTool(tc);
+        currentMessages.push({ role: 'tool', tool_call_id: tc.id, content: result });
+      }
+      continue;
     }
     return assistantMsg.content || '';
   }
 }
 
-async function callOpenAI(currentMessages, options = {}) {
-  const { model = HEAVY_MODEL, useTools = true, toolChoice = "auto", temperature = TEMPERATURE, maxTokens = MAX_TOKENS } = options;
-  const base = OPENAI_ENDPOINT.replace(/\/+$/, '');
-  const url = `${base}/chat/completions`;
-  const payload = { model, messages: currentMessages, temperature, max_tokens: maxTokens };
-  if (useTools) payload.tools = tools;
-  if (useTools) payload.tool_choice = toolChoice;
-
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const response = await axios.post(url, payload, {
-        headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-        timeout: 4200000,
-      });
-      return response.data.choices[0];
-    } catch (error) {
-      const msg = (error.response?.data?.error?.message) || error.message;
-      console.error(`⚠️ API attempt ${attempt}/${MAX_RETRIES} failed: ${msg}`);
-      if (attempt === MAX_RETRIES) throw new Error('Max retries reached.');
-      await new Promise(r => setTimeout(r, 1200 * attempt));
-    }
-  }
-}
-
-// ====================== CORE EXECUTION FUNCTION ======================
+// ====================== CORE EXECUTION ======================
 async function executeTask() {
   try {
     let displayReply = await processWithTools(messages);
@@ -668,7 +729,7 @@ async function executeTask() {
   }
 }
 
-// ====================== HTTP OPENAI-COMPATIBLE ENDPOINT ======================
+// ====================== HTTP SERVER ======================
 function startHttpServer() {
   const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url === '/v1/chat/completions') {
@@ -677,7 +738,6 @@ function startHttpServer() {
       req.on('end', async () => {
         try {
           const data = JSON.parse(body);
-          // Create temporary conversation for this request (stateless per call)
           let tempMessages = [{ role: 'system', content: systemPrompt }];
           if (data.messages) tempMessages = tempMessages.concat(data.messages);
 
@@ -714,61 +774,76 @@ function startHttpServer() {
   });
 }
 
-// ====================== RUN MODE ======================
+// ====================== READLINE ======================
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+  prompt: 'You: '
+});
+
+// ====================== MAIN ======================
 async function main() {
-    // Background/daemon fix: spawn detached child and exit immediately
-    if (backgroundMode && promptArg) {
-      console.log('🔄 Starting background/daemon mode...');
-      const child = child_process.spawn(process.argv[0], process.argv.slice(1).filter(a => a !== '--background'), {
-        detached: true,
-        stdio: 'ignore',
-        cwd: launchDir
-      });
-      child.unref();
-      console.log('✅ Background process started (terminal freed).');
+  // Background daemon
+  if (backgroundMode && promptArg) {
+    console.log('🔄 Starting background/daemon mode...');
+    const child = child_process.spawn(process.argv[0], process.argv.slice(1).filter(a => a !== '--background'), {
+      detached: true,
+      stdio: 'ignore',
+      cwd: launchDir
+    });
+    child.unref();
+    console.log('✅ Background process started (terminal freed).');
+    process.exit(0);
+  }
+
+  if (promptArg) {
+    // NON-INTERACTIVE MODE
+    console.log(`\n🚀 7coder non-interactive mode`);
+    console.log(`Task: ${promptArg}`);
+    messages.push({ role: 'user', content: promptArg });
+    await executeTask();
+    if (ENABLE_HTTP_SERVER) {
+      startHttpServer();
+    } else {
       process.exit(0);
     }
-    if (promptArg) {
-        // NON-INTERACTIVE MODE
-        console.log(`\n🚀 7coder non-interactive mode`);
-        console.log(`Task: ${promptArg}`);
-        messages.push({ role: 'user', content: promptArg });
-        await executeTask();
-        if (ENABLE_HTTP_SERVER) {
-          startHttpServer()
-        }
-        process.exit(0);
-      } else {
-        // INTERACTIVE REPL (default)
-        console.log('\n🚀 Welcome to 7coder (interactive REPL)');
-        if (ENABLE_RALPH_MODE) console.log('🎉 Ralph Wiggum mode ENABLED');
-        if (DANGER_MODE) console.log('⚠️ DANGER MODE ENABLED');
-        console.log('Type your task followed by a new line then "/execute-task-now"')
-        console.log('to start a new task, or type "/bye" to quit.\n');
-      
-        rl.prompt();
-      
-        rl.on('line', async (input) => {
-          const trimmed = input.trim();
-          if (trimmed.toLowerCase() === '/bye') {
-            console.log('👋 Goodbye!');
-            rl.close();
-            return;
-          }
-          
-          if (!trimmed) {
-            rl.prompt();
-            return;
-          }
-      
-          if (input == '/execute-task-now') {
-            messages.push({ role: 'user', content: trimmed });
-            console.log('7coder is thinking...');
-            await executeTask();
-          }
-          rl.prompt();
-          
-        });
+  } else {
+    // INTERACTIVE REPL
+    console.log('\n🚀 Welcome to 7coder (interactive REPL)');
+    if (ENABLE_RALPH_MODE) console.log('🎉 Ralph Wiggum mode ENABLED');
+    if (DANGER_MODE) console.log('⚠️ DANGER MODE ENABLED');
+    console.log('Type your task (multi-line OK), then on a new line type "/execute-task-now" to run.');
+    console.log('Type "/bye" to quit.\n');
+
+    let currentPrompt = '';
+
+    rl.prompt();
+
+    rl.on('line', async (input) => {
+      const trimmed = input.trim();
+
+      if (trimmed.toLowerCase() === '/bye') {
+        console.log('👋 Goodbye!');
+        rl.close();
+        return;
       }
+
+      if (trimmed === '/execute-task-now') {
+        if (currentPrompt.trim()) {
+          console.log('7coder is thinking...');
+          messages.push({ role: 'user', content: currentPrompt.trim() });
+          await executeTask();
+          currentPrompt = '';
+        } else {
+          console.log('No task entered.');
+        }
+      } else if (trimmed) {
+        currentPrompt += input + '\n';
+      }
+
+      rl.prompt();
+    });
+  }
 }
-main()
+
+main().catch(console.error);
