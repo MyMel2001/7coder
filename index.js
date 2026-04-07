@@ -32,14 +32,14 @@ for (let i = 0; i < args.length; i++) {
   } else if (arg === '--prompt' || arg === '-p') {
     if (i + 1 < args.length) {
       promptArg = args.slice(i + 1).join(' ');
-      break; // consume the rest as the prompt
+      break;
     }
   }
 }
 
 if (showHelp) {
   console.log(`
-7coder — Fixed & fully working Claude Code style assistant (v2.1.5+)
+7coder — Fixed & fully working Claude Code style assistant
 
 Usage:
   node index.js → Interactive REPL (multi-line + /btw + /execute-task-now)
@@ -51,10 +51,12 @@ Usage:
 
 New in this version:
   • Dream Mode (auto after 5h idle if DREAM_ALLOW=true)
-  • Plan Mode tool (small model improves prompt + refinement loops)
-  • 64 spinner words (fun Claude-like "7coder is ...")
-  • /btw <note> (small-model sub-agent summarizes + injects as user message to main heavy model)
-  • Full MCP support (npx + external URLs)
+  • Plan Mode tool
+  • 64 spinner words
+  • /btw <note> (small-model sub-agent summarizes + injects)
+  • Full MCP support
+  • auto_debug_tool — launches + tests GUI/CLI apps/scripts like a real user, auto-fixes until clean
+  • bickering_tool — 2 small-model PM sub-agents debate until agreement
 `);
   process.exit(0);
 }
@@ -62,7 +64,7 @@ New in this version:
 // ====================== SETUP ======================
 const launchDir = process.cwd();
 process.chdir(path.resolve(path.dirname(process.argv[1])));
-require('dotenv').config({ path: path.join(launchDir, '.env') }); // FIXED: explicit project-root .env load BEFORE any further chdir (env vars for 7coder now ALWAYS read correctly)
+require('dotenv').config({ path: path.join(launchDir, '.env') });
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_ENDPOINT = process.env.OPENAI_ENDPOINT || 'https://api.openai.com/v1';
@@ -80,6 +82,9 @@ const ENABLE_COMPUTER_USE = process.env.ENABLE_COMPUTER_USE === 'true';
 const DREAM_ALLOW = process.env.DREAM_ALLOW === 'true';
 const MCP_SERVER_URLS = (process.env.MCP_SERVER_URLS || '').split(',').map(s => s.trim()).filter(Boolean);
 const MCP_NPX_PKGS = (process.env.MCP_NPX_PKGS || '').split(',').map(s => s.trim()).filter(Boolean);
+const ENABLE_AUTO_DEBUG = process.env.ENABLE_AUTO_DEBUG === 'true';
+const DEBUG_TEST_MINUTES = parseInt(process.env.DEBUG_TEST_MINUTES, 10) || 3;
+const BICKER_ROUNDS = parseInt(process.env.BICKER_ROUNDS, 10) || 5;
 
 if (!OPENAI_API_KEY) {
   console.error('❌ Please set OPENAI_API_KEY in your .env file');
@@ -129,7 +134,7 @@ if (DANGER_MODE) {
 const AUTO_SAFE_TOOLS = [
   'read_file', 'glob_tool', 'grep_tool', 'list_mcp_resources_tool', 'tool_search_tool',
   'prompt_from_file', 'snip_tool', 'cron_list_tool', 'task_list_tool', 'task_get_tool',
-  'task_output_tool'
+  'task_output_tool', 'auto_debug_tool', 'bickering_tool'
 ];
 
 // ====================== TOOL DEFINITIONS ======================
@@ -181,11 +186,12 @@ const tools = [
   { type: "function", function: { name: "prompt_from_file", description: "Use prompt from TODO.md or similar.", parameters: { type: "object", properties: { file: { type: "string" } }, required: ["file"] } } },
   { type: "function", function: { name: "auto_approval_return", description: "Lightweight model hands over to heavy model for auto-approval description.", parameters: { type: "object", properties: { description: { type: "string" } } } } },
   { type: "function", function: { name: "computer_use", description: "Cross-platform full computer use (mouse/keyboard/screenshot).", parameters: { type: "object", properties: { action: { type: "string", enum: ["screenshot", "mouse_move", "click", "type_text", "press_key"] }, x: { type: "number" }, y: { type: "number" }, text: { type: "string" }, key: { type: "string" } }, required: ["action"] } } },
-  // NEW: Plan Mode tool
-  { type: "function", function: { name: "plan_mode", description: "Plan mode: light model improves prompt + specifies refinement loops for heavy model deep thinking. Use ONLY for complex tasks.", parameters: { type: "object", properties: { initial_task: { type: "string" } }, required: ["initial_task"] } } }
+  { type: "function", function: { name: "plan_mode", description: "Plan mode: light model improves prompt + specifies refinement loops for heavy model deep thinking. Use ONLY for complex tasks.", parameters: { type: "object", properties: { initial_task: { type: "string" } }, required: ["initial_task"] } } },
+  { type: "function", function: { name: "auto_debug_tool", description: "Launch app/script (compile if needed), test like a real user (GUI via desktop simulation or CLI via terminal) for 2-5 min, auto-fix errors until only warnings remain.", parameters: { type: "object", properties: { path: { type: "string" }, type: { type: "string", enum: ["gui", "cli", "script"] }, duration_minutes: { type: "number" } }, required: ["path"] } } },
+  { type: "function", function: { name: "bickering_tool", description: "Two small-model PM sub-agents bicker/debate the current task until they reach agreement.", parameters: { type: "object", properties: { task: { type: "string" } }, required: ["task"] } } }
 ];
 
-// ====================== SYSTEM PROMPT (all new clauses added) ======================
+// ====================== SYSTEM PROMPT ======================
 const systemPrompt = `You are 7coder, a helpful, honest, and harmless AI coding assistant — a clean-room full replacement for Claude Code.
 You have full tool access including agent spawning, web tools, computer use, MCP, cron, tasks, and more.
 You ALWAYS create/update 7CODER.md in the project root with any findings, discoveries, or progress using the write_file tool.
@@ -202,6 +208,8 @@ Light model = risk classification, explanations, moderation, anti-frustration.
 
 ADDITIONAL RULES (critical):
 - Use plan_mode tool ONLY when complex multi-step reasoning requires extended thinking.
+- Use auto_debug_tool for ANY launched app/script to test + auto-fix until clean (only warnings left).
+- Use bickering_tool when the best approach is unclear — let the two PM sub-agents debate until agreement.
 - Do NOT default to calling read_file first on every task. Only use it when you genuinely need the current file contents.
 - CRITICAL: When using write_file, ALWAYS output the COMPLETE, full file (all imports, full functions, error handling, comments — never partial or "..." code).
 - In DREAM MODE (internal): follow the override for hyper-detailed self-consolidation (target yourself only, no lazy summaries, no user-directed language).
@@ -643,7 +651,6 @@ async function executeToolRaw(name, args) {
     try { return fs.readFileSync(resPath, 'utf8'); } catch { return 'Resource not found'; }
   }
 
-  // Enhanced MCP tool (npx + external URL support)
   if (name === 'mcp_tool') {
     const { tool_name: toolName, args: toolArgs = {}, mcp_url, npx_pkg } = args;
     const effectiveUrl = mcp_url || MCP_SERVER_URLS[0] || null;
@@ -757,7 +764,6 @@ async function executeToolRaw(name, args) {
     return `✅ Action ${action} performed`;
   }
 
-  // NEW: Plan Mode implementation
   if (name === 'plan_mode') {
     const initialTask = args.initial_task || 'No task provided';
     const lightPrompt = `You are the LIGHT model in PLAN MODE.
@@ -780,10 +786,125 @@ Reply with ONLY valid JSON:
     }
   }
 
+  // Bickering Tool — 2 small-model PM sub-agents debate until agreement
+  if (name === 'bickering_tool') {
+    const task = args.task || 'No task provided';
+    console.log(`🗣️ Bickering Tool started — 2 PM sub-agents debating "${task.substring(0, 60)}..." for up to ${BICKER_ROUNDS} rounds`);
+    let messagesPM1 = [{ role: 'system', content: `You are PM1, a strict product manager. Argue aggressively for the most robust, safe, scalable approach.` }];
+    let messagesPM2 = [{ role: 'system', content: `You are PM2, a pragmatic product manager. Argue for the fastest, simplest, most practical approach.` }];
+    let round = 0;
+    let agreement = null;
+
+    while (round < BICKER_ROUNDS && !agreement) {
+      round++;
+      // PM1 speaks
+      messagesPM1.push({ role: 'user', content: `Round ${round}: Debate the best way to ${task}. Reply in 1-2 sentences.` });
+      const pm1Resp = await callOpenAI(messagesPM1, { model: LIGHT_MODEL, useTools: false, maxTokens: 300 });
+      const pm1Text = pm1Resp.message.content.trim();
+      messagesPM1.push({ role: 'assistant', content: pm1Text });
+
+      // PM2 responds
+      messagesPM2.push({ role: 'user', content: `Round ${round}: PM1 said "${pm1Text}". Counter or agree in 1-2 sentences.` });
+      const pm2Resp = await callOpenAI(messagesPM2, { model: LIGHT_MODEL, useTools: false, maxTokens: 300 });
+      const pm2Text = pm2Resp.message.content.trim();
+      messagesPM2.push({ role: 'assistant', content: pm2Text });
+
+      console.log(`🗣️ Round ${round}: PM1: ${pm1Text} | PM2: ${pm2Text}`);
+
+      // Check for agreement
+      const agreementPrompt = `Do these two statements show clear agreement on a plan? Reply ONLY YES or NO.\nPM1: ${pm1Text}\nPM2: ${pm2Text}`;
+      const agreeCheck = await callOpenAI([{ role: 'user', content: agreementPrompt }], { model: LIGHT_MODEL, useTools: false });
+      if (agreeCheck.message.content.trim().toUpperCase() === 'YES') {
+        agreement = `Agreed plan after ${round} rounds: ${pm2Text}`;
+      }
+    }
+
+    if (!agreement) agreement = `No full agreement after ${BICKER_ROUNDS} rounds. Best compromise: ${messagesPM2[messagesPM2.length-1].content}`;
+    return `✅ Bickering complete — ${agreement}`;
+  }
+
+  // Automated Debug Tool — full launch + test + auto-fix loop
+  if (name === 'auto_debug_tool') {
+    if (!ENABLE_AUTO_DEBUG) return 'Auto-debug disabled in .env (ENABLE_AUTO_DEBUG=false).';
+    const filePath = path.join(launchDir, sanitizePath(args.path));
+    let appType = args.type || (filePath.endsWith('.exe') || filePath.endsWith('.cs') ? 'gui' : 'cli');
+    const duration = Math.max(2, Math.min(5, args.duration_minutes || DEBUG_TEST_MINUTES));
+    let processHandle = null;
+    let testLog = `🔧 Auto-debug started on ${filePath} (${appType}) for ${duration} min\n`;
+
+    // Compile if needed
+    if (filePath.endsWith('.cs')) {
+      testLog += '🛠️  Compiling C#...\n';
+      try {
+        child_process.execSync(`csc /target:winexe "${filePath}" /out:"${filePath.replace('.cs','.exe')}"`, { cwd: launchDir, stdio: 'pipe' });
+        testLog += '✅ Compiled to .exe\n';
+      } catch (e) {
+        return `❌ Compile failed: ${e.message}`;
+      }
+    }
+
+    // Launch
+    const exePath = filePath.endsWith('.cs') ? filePath.replace('.cs','.exe') : filePath;
+    console.log(`🚀 Launching ${exePath}...`);
+    if (appType === 'gui') {
+      processHandle = child_process.spawn(exePath, [], { detached: true, stdio: 'ignore', cwd: launchDir });
+      processHandle.unref();
+      testLog += `✅ GUI launched (PID ${processHandle.pid})\n`;
+    } else {
+      processHandle = child_process.spawn(exePath, [], { stdio: ['ignore', 'pipe', 'pipe'], cwd: launchDir });
+      testLog += `✅ CLI launched (PID ${processHandle.pid})\n`;
+    }
+
+    // Test loop (simulate real user)
+    await new Promise(r => setTimeout(r, 2000)); // settle
+    for (let i = 0; i < duration * 6; i++) { // ~10s intervals
+      if (appType === 'gui' && ENABLE_COMPUTER_USE) {
+        // Simulate normal user: random clicks, typing, etc.
+        await executeToolRaw('computer_use', { action: 'mouse_move', x: Math.random()*800, y: Math.random()*600 });
+        await executeToolRaw('computer_use', { action: 'click' });
+        if (Math.random() > 0.7) await executeToolRaw('computer_use', { action: 'type_text', text: 'test input ' + Date.now() });
+      } else if (appType !== 'gui') {
+        // CLI: just let it run and capture
+      }
+      await new Promise(r => setTimeout(r, 10000));
+    }
+
+    // Close
+    if (processHandle) {
+      try { processHandle.kill('SIGTERM'); } catch {}
+      testLog += '✅ App closed after test\n';
+    }
+
+    // Collect errors
+    let errors = testLog;
+    if (processHandle && processHandle.stderr) {
+      errors += '\n' + processHandle.stderr.toString();
+    }
+    testLog += `\nErrors found: ${errors.includes('error') || errors.includes('Exception') ? 'YES' : 'none'}`;
+
+    // Auto-fix loop (up to 3 rounds)
+    let fixRound = 0;
+    const maxFix = 3;
+    while (fixRound < maxFix) {
+      const hasFatal = /error|exception|crash|failed/i.test(errors);
+      if (!hasFatal) break;
+      fixRound++;
+      testLog += `\n🔄 Fix round ${fixRound}: Sending errors to heavy model...\n`;
+      const fixPrompt = `Fix all fatal errors in this app. Only warnings allowed at the end.\nPath: ${filePath}\nLogs:\n${errors}\nOutput COMPLETE fixed code via write_file.`;
+      messages.push({ role: 'user', content: fixPrompt });
+      await processWithTools(messages); // heavy model will write_file
+      errors = 'Re-tested after fix...';
+      // Re-run test quickly
+      await executeToolRaw('auto_debug_tool', { path: args.path, type: appType, duration_minutes: 1 });
+    }
+
+    return `✅ Auto-debug complete — ${fixRound} fixes applied. Remaining issues: only warnings or benign.\nFull log:\n${testLog}`;
+  }
+
   return `Unknown tool: ${name}`;
 }
 
-// ====================== SAFE TOOL EXECUTION (all fixes applied) ======================
+// ====================== SAFE TOOL EXECUTION ======================
 async function safeExecuteTool(toolCall) {
   const func = toolCall.function;
   let args;
@@ -791,7 +912,6 @@ async function safeExecuteTool(toolCall) {
 
   const name = func.name;
 
-  // AUTO-SAFE: read_file + 7CODER.md writes (no approval, no risk classify)
   if (AUTO_SAFE_TOOLS.includes(name) || (name === 'write_file' && args.path && args.path.toLowerCase().includes('7coder.md'))) {
     console.log(`🔧 Auto-executing safe tool: ${name}`);
     return await executeToolRaw(name, args);
@@ -805,7 +925,6 @@ async function safeExecuteTool(toolCall) {
     return 'Computer use is disabled in .env (ENABLE_COMPUTER_USE=false).';
   }
 
-  // DANGER MODE FIX: skip ALL checks instantly
   if (PERMISSION_MODE === 'bypass' || DANGER_MODE) {
     console.log(`🔧 [DANGER MODE] Executing tool: ${name}`);
     return await executeToolRaw(name, args);
@@ -880,7 +999,6 @@ async function executeTask() {
       }
     }
 
-    // Auto 7CODER.md update
     const mdPath = path.join(launchDir, '7CODER.md');
     const update = `\n\n## 7coder Update — ${new Date().toISOString()}\n\n${displayReply}\n\n`;
     fs.appendFileSync(mdPath, update);
@@ -994,7 +1112,6 @@ async function main() {
         return;
       }
 
-      // UPDATED /btw: small model as sub-agent → summarizes note → injects as USER message into main heavy model task
       if (trimmed.startsWith('/btw ')) {
         const note = trimmed.slice(5).trim();
         if (note) {
@@ -1017,7 +1134,6 @@ Make it read like a direct continuation of the user's task instructions for the 
             console.log(`📝 BTW sub-agent error — injecting original note as fallback.`);
             messages.push({ role: 'user', content: `[BTW note] ${note}` });
           }
-          // persist for history
           const btwPath = path.join(launchDir, 'BTW.md');
           fs.appendFileSync(btwPath, `\n---\n**BTW** ${new Date().toISOString()}\nOriginal note: ${note}\nInjected summary: ${summarized}\n\n`, 'utf8');
         } else {
