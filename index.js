@@ -63,7 +63,7 @@ New in this version:
 
 // ====================== SETUP ======================
 const launchDir = process.cwd();
-const appDir = dirname(require.main.filename);
+const appDir = path.dirname(require.main.filename);
 process.chdir(path.resolve(path.dirname(process.argv[1])));
 require('dotenv').config({ path: path.join(appDir, '.env') });
 
