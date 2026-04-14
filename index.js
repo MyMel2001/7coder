@@ -5,7 +5,7 @@ const fs = require('fs');
 const child_process = require('child_process');
 const http = require('http');
 
-// ====================== CLI ARGUMENT PARSING (Node 13 safe) ======================
+// ====================== CLI ARGUMENT PARSING (Node 13 safe) =====================
 const args = process.argv.slice(2);
 let promptArg = null;
 let dangerMode = false;
@@ -63,8 +63,9 @@ New in this version:
 
 // ====================== SETUP ======================
 const launchDir = process.cwd();
+const appDir = dirname(require.main.filename);
 process.chdir(path.resolve(path.dirname(process.argv[1])));
-require('dotenv').config({ path: path.join(launchDir, '.env') });
+require('dotenv').config({ path: path.join(appDir, '.env') });
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_ENDPOINT = process.env.OPENAI_ENDPOINT || 'https://api.openai.com/v1';
