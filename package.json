@@ -1,5 +1,5 @@
 {
-  "name": "7coder",
+  "name": "@nodemixaholic/7coder",
   "version": "2.1.0",
   "description": "7coder — Full clean-room Claude Code replacement. Advanced tools (agents, MCP, computer use, cron, workflows), sophisticated permission system (default/auto/bypass/denial), near-prompt-injection-proof computer use, HTTP OpenAI-compatible endpoint for any UI, Ralph Wiggum loop, 7CODER.md findings file, anti-frustration detection. Zero extra dependencies. Broad compatibility: Windows 7/Node.js 13+ to modern systems.",
   "main": "index.js",
