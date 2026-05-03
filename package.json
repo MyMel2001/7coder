@@ -9,6 +9,9 @@
     "llm",
     "ai"
   ],
+  "bin": {
+    "my-package": "./index.js"
+  }
   "homepage": "https://github.com/MyMel2001/7Coder#readme",
   "bugs": {
     "url": "https://github.com/MyMel2001/7Coder/issues"
