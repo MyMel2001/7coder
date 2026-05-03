@@ -10,7 +10,7 @@
     "ai"
   ],
   "bin": {
-    "my-package": "./index.js"
+    "7coder": "./index.js"
   }
   "homepage": "https://github.com/MyMel2001/7Coder#readme",
   "bugs": {
