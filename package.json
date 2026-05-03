@@ -1,17 +1,36 @@
 {
-  "name": "@nodemixaholic/7coder",
-  "version": "2.1.0",
+  "name": "7coder",
+  "version": "2.1.5",
   "description": "7coder — Full clean-room Claude Code replacement. Advanced tools (agents, MCP, computer use, cron, workflows), sophisticated permission system (default/auto/bypass/denial), near-prompt-injection-proof computer use, HTTP OpenAI-compatible endpoint for any UI, Ralph Wiggum loop, 7CODER.md findings file, anti-frustration detection. Zero extra dependencies. Broad compatibility: Windows 7/Node.js 13+ to modern systems.",
+  "keywords": [
+    "code",
+    "vibe-code",
+    "harness",
+    "llm",
+    "ai"
+  ],
+  "homepage": "https://github.com/MyMel2001/7Coder#readme",
+  "bugs": {
+    "url": "https://github.com/MyMel2001/7Coder/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MyMel2001/7Coder.git"
+  },
+  "license": "SEE LICENSE IN LICENSE",
+  "author": "nodemixaholic",
+  "type": "commonjs",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "server": "node index.js --server"
   },
-  "engines": {
-    "node": ">=13.0.0"
-  },
   "dependencies": {
     "axios": "^0.21.4",
     "dotenv": "^8.2.0"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=13.0.0"
   }
 }
