@@ -32,7 +32,6 @@
     "axios": "^0.21.4",
     "dotenv": "^8.2.0"
   },
-  "devDependencies": {},
   "engines": {
     "node": ">=13.0.0"
   }
